@@ -357,6 +357,95 @@ def check_irradiance_consistency_qcrad(solar_zenith, ghi, dhi, dni,
     return consistent_components, diffuse_ratio_limit
 
 
+def compute_GHI(dni, dhi, sza, szalimit, fillvalue, fillnightoption):
+    '''
+    Check consistency of GHI, DHI and DNI using QCRad criteria.
+
+    Uses criteria given in [1]_ to validate the ratio of irradiance
+    components.
+
+    .. warning:: Not valid for night time. While you can pass data
+       from night time to this function, be aware that the truth
+       values returned for that data will not be valid.
+
+    Parameters
+    ----------
+    solar_zenith : Series
+        Solar zenith angle in degrees
+    ghi : Series
+        Global horizontal irradiance in :math:`W/m^2`
+    dhi : Series
+        Diffuse horizontal irradiance in :math:`W/m^2`
+    dni : Series
+        Direct normal irradiance in :math:`W/m^2`
+    param : dict
+        keys are 'ghi_ratio' and 'dhi_ratio'. For each key, value is a dict
+        with keys 'high_zenith' and 'low_zenith'; for each of these keys,
+        value is a dict with keys 'zenith_bounds', 'ghi_bounds', and
+        'ratio_bounds' and value is an ordered pair [lower, upper]
+        of float.
+
+    Returns
+    -------
+    consistent_components : Series
+        True where `ghi`, `dhi` and `dni` components are consistent.
+    diffuse_ratio_limit : Series
+        True where diffuse to GHI ratio passes limit test.
+
+    Notes
+    -----
+    Copyright (c) 2019 SolarArbiter. See the file
+    LICENSES/SOLARFORECASTARBITER_LICENSE at the top level directory
+    of this distribution and at `<https://github.com/pvlib/
+    pvanalytics/blob/master/LICENSES/SOLARFORECASTARBITER_LICENSE>`_
+    for more information.
+
+    References
+    ----------
+    .. [1] C. N. Long and Y. Shi, An Automated Quality Assessment and Control
+       Algorithm for Surface Radiation Measurements, The Open Atmospheric
+       Science Journal 2, pp. 23-37, 2008.
+    
+    
+    Computes GHI from component sum equation
+    ghi = dni * Cos(sza) + dhi
+
+    Inputs: 
+    dni is an array of floats
+    dhi is an array of floats (Must be same units as DNI)
+    sza is an array of floats (degrees)
+    
+    szalimit: float (degrees) SZA boundary between night and day. SZA values greater than the limit are filled with a constant
+        default: 90
+        
+    fillvalue: float. The value that is used to fill in nighttime values.
+        default: NA
+    
+    fillnightoption: 
+        1: fill the nighttime value with the fill value (NA, 0, -99 etc)
+        2: fill the nighttime value with the DHI value such that at night (GHI == DHI)
+        Other: do nothing to the nighttimie values. compute them as they are. 
+
+    Returns: GHI: array of floats, (same units as DNI)
+    '''               
+    # Not sure if we want to do a test to make sure the DNI, DHI, SZA are valid values.
+    # Specifically are they floats. I don't think we would want to test if they are reasonable..
+    # Compute the GHI value from the component sum equation
+    ghi = dni * np.cos(sza * np.pi / 180) + dhi
+    # Decide what you are going to do with the nighttime values
+    if (fillnightoption == 1) |(fillnightoption == 2):
+        # Find the locations where the sun is below the sza limit. 
+        mask = (szalimit <= sza) 
+    if (fillnightoption == 1):    
+        # Replace the nighttime values with a fill value
+        ghi[mask] = fillvalue
+    elif fillnightoption == 2:
+        # Replace the nighttime values with the DHI values. 
+        # This will put 
+        ghi[mask] =dhi[mask]
+    return ghi
+
+
 def clearsky_limits(measured, clearsky, csi_max=1.1):
     """Identify irradiance values which do not exceed clearsky values.
 
