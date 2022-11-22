@@ -35,7 +35,8 @@ def energy_cumulative(energy_series, pct_increase_threshold = 95):
         # If over X percent of the data is increasing (set via the
         # pct_increase_threshold), then assume that the column is cumulative 
         differenced_series_positive_mask = (differenced_series >= -.5)
-        pct_over_zero = differenced_series_positive_mask.value_counts(normalize=True) * 100
+        pct_over_zero = differenced_series_positive_mask.value_counts(
+            normalize=True) * 100
         if pct_over_zero[True] >= pct_increase_threshold:
             energy_series = energy_series.diff()
             return True
@@ -63,7 +64,8 @@ def correct_cumulative_energy(energy_series, pct_increase_threshold = 95):
     Adapted from the NREL PV Fleets quality assurance (QA) routine. 
     """
     # Test if the energy time series is cumulative
-    cum_energy = energy_cumulative(energy_series)
+    cum_energy = energy_cumulative(energy_series,
+                                   pct_increase_threshold)
     # If the energy series is cumulative, correct it
     if cum_energy:
         return energy_series.diff()
