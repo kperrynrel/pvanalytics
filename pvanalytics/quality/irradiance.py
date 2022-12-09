@@ -8,6 +8,7 @@ import pvlib
 
 from pvanalytics import quality
 from pvanalytics import util
+from datetime import timedelta
 
 
 QCRAD_LIMITS = {'ghi_ub': {'mult': 1.5, 'exp': 1.2, 'min': 100},
@@ -660,3 +661,213 @@ def calculate_component_sum_series(solar_zenith,
     return _fill_nighttime(component, component_sum_df,
                            fill_night_value,
                            solar_zenith, zenith_limit)
+
+
+def _filter_nighttime_data(irradiance_series, sza_series,
+                           lower_limit,
+                           upper_limit,
+                           sza_night_limit):
+    r"""
+    Filter irradiance data to nighttime periods only.
+    """
+    # Find the times when the sun is above the SZA limit, representing
+    # daytime minutes
+    sza_mask = (sza_night_limit > sza_series)
+    # Set daytime values to np.nan
+    # irradiance_series[mask] = np.nan
+    # Find the times when the data is below the lower data limit
+    # or above the upper data limit and filter these periods out
+    limit_mask = ((irradiance_series < lower_limit) |
+                  (irradiance_series > upper_limit))
+    # Set outlier periods to np.nan
+    irradiance_series_filtered = irradiance_series[sza_mask | limit_mask]
+    irradiance_series_filtered = irradiance_series_filtered.reindex(
+        irradiance_series.index)
+    return irradiance_series_filtered
+
+
+def _groupby_nighttime_data(irradiance_series):
+    r"""
+    Group the irradiance nighttime data by day.
+    """
+    # Group the data together by date
+    irradiance_dates = pd.Series(irradiance_series.index.date,
+                                 index=irradiance_series.index)
+    # Include midnight values as the previous date, not the current date.
+    # This is at Josh's request!
+    irradiance_dates.loc[(irradiance_dates.index.second == 0) &
+                         (irradiance_dates.index.minute == 0) &
+                         (irradiance_dates.index.hour == 0)] = \
+        irradiance_dates - timedelta(days=1)
+    return irradiance_dates
+
+
+def calculate_nighttime_offset_uncertainty(irradiance_series, sza_series,
+                                           lower_limit=-10,
+                                           upper_limit=10,
+                                           sza_night_limit=108):
+    r"""
+    Computes the standard deviation of nighttime data, to act as the
+    uncertainty for each night period. Meant to act in unison with the
+    calculate_nighttime_offset() function.
+
+    For best results, filter out outliers before running this function.
+
+    Parameters
+    ----------
+    irradiance_series : Pandas Series
+        Pandas Series of irradiance data with datetime index
+    sza_series : Pandas series
+        Pandas series of zenith angles with datetime index.
+        Used to determine when nighttime periods occur
+    lower_limit : float, optional
+        Outlier detection lower limit. The default is -10.
+    upper_limit : float, optional
+        Outlier detection upper limit. The default is 10.
+    sza_night_limit : float, optional
+        Solar zenith angle boundary limit. The default
+        is 108.
+    offset_type: String.
+        Can be 'median' or 'mean'. If median is selected, then the median
+        of nighttime values is computed as the offset. Likewise, if mean
+        is selected, the mean of nighttime values is computed as the offset.
+
+    Returns
+    -------
+    uncertainty_irradiance : Pandas series
+        Pandas datetime series of standard deviation of daily irradiance
+        nighttime values, to act as a proxy for uncertainty in the nighttime
+        offset calculations
+    """
+    # Filter to nighttime periods only
+    irradiance_series = _filter_nighttime_data(irradiance_series,
+                                               sza_series,
+                                               lower_limit,
+                                               upper_limit,
+                                               sza_night_limit)
+    # Group the irradiance data by daily intervals, from [midnight, midnight)
+    # each day
+    irradiance_dates = _groupby_nighttime_data(irradiance_series)
+    # Calculate the standard deviation of the nightly data, which is equal to
+    # the uncertainty
+    uncertainty_irradiance = irradiance_series.groupby(
+        irradiance_dates).transform('std')
+    return uncertainty_irradiance
+
+
+def calculate_nighttime_offset(irradiance_series, sza_series,
+                               lower_limit=-10,
+                               upper_limit=10,
+                               sza_night_limit=108,
+                               offset_type='median'):
+    r"""
+    Determines the nighttime offset value of a data set (can be median or
+    mean). Computes the offset value for each night.
+    If a nighttime value can not be found for a particular date,
+    the median offset value for the entire data set is used.
+
+    For best results, filter out outliers before running this function.
+
+    Parameters
+    ----------
+    irradiance_series : Pandas Series
+        Pandas Series of irradiance data with datetime index
+    sza_series : Pandas series
+        Pandas series of zenith angles with datetime index.
+        Used to determine when nighttime periods occur
+    lower_limit : float, optional
+        Outlier detection lower limit. The default is -10.
+    upper_limit : float, optional
+        Outlier detection upper limit. The default is 10.
+    sza_night_limit : float, optional
+        Solar zenith angle boundary limit. The default
+        is 108.
+    offset_type: String.
+        Can be 'median' or 'mean'. If median is selected, then the median
+        of nighttime values is computed as the offset. Likewise, if mean
+        is selected, the mean of nighttime values is computed as the offset.
+
+    Returns
+    -------
+    offset_irradiance : Pandas series
+        Pandas datetime series of offset nighttime values for the data set
+    """
+    # Throw an error if the offset_type isn't 'median' or 'mean'
+    if (offset_type not in ['median', 'mean']):
+        raise ValueError(
+            "Please check offset_type variable. Must be 'mean' or 'median'."
+        )
+    # Filter to nighttime periods only
+    irradiance_series = _filter_nighttime_data(irradiance_series,
+                                               sza_series,
+                                               lower_limit,
+                                               upper_limit,
+                                               sza_night_limit)
+    # Group the irradiance data by daily intervals, from [midnight, midnight)
+    # each day
+    irradiance_dates = _groupby_nighttime_data(irradiance_series)
+    offset_irradiance = irradiance_series.groupby(
+        irradiance_dates).transform(offset_type)
+    # Fill any NaN periods, representing days with no adequate nighttime data,
+    # with the median value associated with the time series
+    offset_irradiance = offset_irradiance.fillna(offset_irradiance.median())
+    return offset_irradiance
+
+
+def correct_offset(irradiance_series, sza_series,
+                   lower_limit=-10,
+                   upper_limit=10,
+                   sza_night_limit=108,
+                   offset_type='median'):
+    r"""
+
+    Parameters
+    ----------
+    irradiance_series : Pandas Series
+        Pandas Series of irradiance data with datetime index. Time series here
+        is assumed as 
+    sza_series : Pandas series
+        Pandas series of zenith angles with datetime index.
+        Used to determine when nighttime periods occur
+    lower_limit : float, optional
+        Outlier detection lower limit. The default is -10.
+    upper_limit : float, optional
+        Outlier detection upper limit. The default is 10.
+    sza_night_limit : float, optional
+        Solar zenith angle boundary limit. The default
+        is 108.
+    offset_type: String
+        Can be 'median' or 'mean'. If median is selected, then the median
+        of nighttime values is computed as the offset. Likewise, if mean
+        is selected, the mean of nighttime values is computed as the offset.
+
+    Returns
+    -------
+    irradiance_series_offset_corrected : Pandas series
+        Pandas datetime series of irradiance data, corrected using the daily
+        nighttime offset values.
+
+    Notes
+    -----
+    This method is adapted from the conference publication "Structure of a
+    comprehensive solar radiation dataset" by J. Peterson and F. Vignola,
+    in particular the methods for calculating nighttime offsets and subtracting
+    them from solar irradiance data. The sza_night_limit value of 108 is
+    directly taken from this publication.
+
+    References
+    ----------
+    .. [1] J. Peterson and F. Vignola. Structure of a comprehensive solar
+        radiation dataset, ASES National Solar Conference 2017,
+        Denver, Colorado, 9-12 October 2017.
+        http://solardat.uoregon.edu/download/Papers/Structure_of_a_comprehensive_solar_radiation_dataset_ASES_2017_Final.pdf
+    """ # noqa: E501
+    # Get the nightttime medians for the irradiance time series
+    nighttime_offsets = calculate_nighttime_offset(irradiance_series,
+                                                   sza_series,
+                                                   lower_limit,
+                                                   upper_limit,
+                                                   sza_night_limit)
+    # Subtract the nighttime offset from the time series
+    irradiance_series_offset_corrected = irradiance_series - nighttime_offsets
+    return irradiance_series_offset_corrected
