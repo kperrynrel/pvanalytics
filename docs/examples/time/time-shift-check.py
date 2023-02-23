@@ -19,28 +19,65 @@ time module.
 # zone.
 
 from pvanalytics.features import daytime
-from pvanalytics.quality.outliers import zscore, hampel
+from pvanalytics.quality.outliers import zscore
 from pvanalytics.quality import gaps
 import matplotlib.pyplot as plt
 import pandas as pd
 import pathlib
-import numpy as np
-from skimage.restoration import denoise_tv_chambolle
-import pathlib
 import pvanalytics
 import pvlib
+
+
+def get_sunrise_sunset_timestamps(time_series, daytime_mask):
+    """
+    Get the timestamp for sunrise/sunset for the time series.
+    
+    Parameters 
+    ----------
+    time_series: Pandas datetime series of measured data (can be irradiance,
+                                                          power, or energy)
+    daytime_mask: Pandas series of boolean masks for day/night periods.
+        Same datetime index as time_series object.
+    
+    Returns
+    ---------
+    sunrise_series: Pandas series of the sunrise 
+        datetimes for each day in the time series.
+    sunset_series: Pandas series of the sunset
+        datetimes for each day in the time series.
+    midday_series: Pandas series of the midway 
+        point datetimes (halfway between sunrise and sunset) for each day in 
+        the time series.
+    """
+    day_night_changes = daytime_mask.groupby(
+        daytime_mask.index.date).apply(lambda x: x.ne(x.shift().ffill()))
+    #Get the first 'day' mask for each day in the series; proxy for sunrise
+    sunrise_series = pd.Series(daytime_mask[(daytime_mask) &
+                                            (day_night_changes)].index)
+    sunrise_series = pd.Series(sunrise_series.groupby(sunrise_series.dt.date).min(),
+                              index= sunrise_series.dt.date).drop_duplicates()
+    # Get the sunset value for each day; this is the first nighttime period
+    # after sunrise  
+    sunset_series = pd.Series(daytime_mask[~(daytime_mask) & (day_night_changes)].index)
+    sunset_series = pd.Series(sunset_series.groupby(sunset_series.dt.date).max(),
+                              index= sunset_series.dt.date).drop_duplicates()
+    # Generate a 'midday' series, which is the midpoint between sunrise
+    # and sunset for every day in the data set
+    midday_series = sunrise_series + ((sunset_series - sunrise_series)/2)
+    #Return the pandas series associated with the sunrise, sunset, and midday points
+    return sunrise_series, sunset_series, midday_series 
 
 
 # %%
 # First, read in the XXX example, which has XXXX
 
 pvanalytics_dir = pathlib.Path(pvanalytics.__file__).parent
-time_shift_file = 'C:/Users/kperry/Documents/source/repos/pvanalytics/pvanalytics/data/1332_ac_power_partial_DST.csv'#pvanalytics_dir / 'data' / '1332_ac_power_partial_DST.csv'
+time_shift_file = 'C:/Users/kperry/Documents/source/repos/time-shift-validation/data/generated_issues/1229_poa_irradiance_west_array_30min_partial_DST.csv'#pvanalytics_dir / 'data' / '1229_poa_irradiance_west_array_30min_partial_DST.csv'
 df = pd.read_csv(time_shift_file, index_col=0, parse_dates=True)
 time_series = df.iloc[:, 0]
 ts_freq_minutes = 30
-latitude = 39.7388
-longitude = -105.1732
+latitude = 28.0392
+longitude = -81.95
 time_series.plot()
 plt.show()
 plt.close('all')
@@ -78,6 +115,8 @@ daytime_mask = daytime.power_or_irradiance(time_series,
                                            freq=str(ts_freq_minutes) + 'T',
                                            low_value_threshold=0.005)
 #Generate the sunrise, sunset, and halfway pts for the data stream
+
+
 sunrise_series, sunset_series, midday_series = get_sunrise_sunset_timestamps(time_series,
                                                                              daytime_mask)
 
