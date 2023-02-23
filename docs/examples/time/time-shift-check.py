@@ -18,7 +18,32 @@ time module.
 # these time shifts, so the data is correctly presented in the original time
 # zone.
 
+from pvanalytics.features import daytime
+from pvanalytics.quality.outliers import zscore, hampel
+from pvanalytics.quality import gaps
+import matplotlib.pyplot as plt
+import pandas as pd
+import pathlib
+import numpy as np
+from skimage.restoration import denoise_tv_chambolle
+import pathlib
+import pvanalytics
+import pvlib
 
+
+# %%
+# First, read in the XXX example, which has XXXX
+
+pvanalytics_dir = pathlib.Path(pvanalytics.__file__).parent
+time_shift_file = 'C:/Users/kperry/Documents/source/repos/pvanalytics/pvanalytics/data/1332_ac_power_partial_DST.csv'#pvanalytics_dir / 'data' / '1332_ac_power_partial_DST.csv'
+df = pd.read_csv(time_shift_file, index_col=0, parse_dates=True)
+time_series = df.iloc[:, 0]
+ts_freq_minutes = 30
+latitude = 39.7388
+longitude = -105.1732
+time_series.plot()
+plt.show()
+plt.close('all')
 
 
 # %%
@@ -86,11 +111,10 @@ midday_diff_series = midday_diff_series[~zscore_outlier_mask]
 
 # Visualize the midday difference series.
 midday_diff_series.plot()
-plt.title(data_stream)
 plt.show()
 plt.close('all')
 
 
 # %%
 # We run '' to estimate the time shifts in the series. 
-time_shift_series = time_shift_estimation(midday_diff_series)
+#time_shift_series = time_shift_estimation(midday_diff_series)
